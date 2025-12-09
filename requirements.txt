@@ -1,0 +1,4 @@
+python-nmap
+python-whois
+colorama
+ollama
