@@ -1,12 +1,8 @@
-# utils/logger.py
 import logging
 import os
 from datetime import datetime
 
 def setup_logger(log_level=logging.INFO):
-    """Loglama yapılandırmasını kurar."""
-    
-    # Logs klasörü yoksa oluştur
     if not os.path.exists('logs'):
         os.makedirs('logs')
 
@@ -20,5 +16,4 @@ def setup_logger(log_level=logging.INFO):
             logging.StreamHandler()
         ]
     )
-    
     return logging.getLogger("CyberSecAgent")

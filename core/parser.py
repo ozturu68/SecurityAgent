@@ -10,7 +10,7 @@ class DualStreamParser:
         if not raw_response:
             return {}
 
-        # Temizlik
+        # Düşünce bloklarını ve Markdown etiketlerini temizle
         clean_text = re.sub(r'<think>.*?</think>', '', raw_response, flags=re.DOTALL)
         clean_text = clean_text.replace('```json', '').replace('```', '').strip()
 
@@ -25,5 +25,5 @@ class DualStreamParser:
             return json.loads(json_str)
 
         except Exception as e:
-            logger.error(f"Parser Hatası: {e}")
+            logger.error(f"JSON Ayrıştırma Hatası: {e}")
             return {}
