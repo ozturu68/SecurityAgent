@@ -44,3 +44,7 @@ BEKLENEN JSON FORMATI:
     "Aksiyon 2 (Somut öneri)"
   ]
 }
+```
+
+ÖNEMLİ: Yanıtının sadece <think> bloğu ve JSON içermesi gerekiyor. Başka hiçbir açıklama YAPMA.
+"""

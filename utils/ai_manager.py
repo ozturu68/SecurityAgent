@@ -51,22 +51,105 @@ class AIManager:
             return False
 
     def check_model(self):
+        """Model varlığını kontrol et ve yoksa indir"""
         print(f"{Fore.CYAN}[*] Model kontrolü: {self.model_name}{Style.RESET_ALL}")
+        
         try:
-            models_info = ollama.list()
-            installed_models = [m['name'] for m in models_info.get('models', [])]
+            # Ollama list komutu ile model listesini al
+            models_response = ollama.list()
             
-            if any(self.model_name in m for m in installed_models):
-                return
-
-            print(f"{Fore.YELLOW}[!] Model indiriliyor...{Style.RESET_ALL}")
+            # API yanıtı debug için loglayalım
+            logger.debug(f"Ollama list yanıtı: {models_response}")
+            
+            # Yanıt yapısını kontrol et
+            if isinstance(models_response, dict):
+                models_list = models_response.get('models', [])
+            else:
+                models_list = []
+            
+            # Model adlarını çıkar (farklı yapıları destekle)
+            installed_models = []
+            for model in models_list:
+                if isinstance(model, dict):
+                    # Yeni API: {'model': 'name:tag', ...} veya {'name': 'name:tag', ...}
+                    model_name = model.get('model') or model.get('name') or model.get('model_name', '')
+                    installed_models.append(model_name)
+                elif isinstance(model, str):
+                    # Eski API: Direkt string listesi
+                    installed_models.append(model)
+            
+            logger.debug(f"Kurulu modeller: {installed_models}")
+            
+            # Model kontrolü (kısmi eşleşme de kabul et)
+            model_exists = any(
+                self.model_name in installed_model or installed_model in self.model_name
+                for installed_model in installed_models
+            )
+            
+            if model_exists:
+                print(f"{Fore.GREEN}[✓] Model mevcut.{Style.RESET_ALL}")
+                return True
+            
+            # Model yoksa indir
+            print(f"{Fore.YELLOW}[!] Model indiriliyor: {self.model_name}{Style.RESET_ALL}")
+            print(f"    Bu işlem birkaç dakika sürebilir...")
+            
             ollama.pull(self.model_name)
-            print(f"\n{Fore.GREEN}[✓] İndirme tamamlandı.{Style.RESET_ALL}")
+            
+            print(f"{Fore.GREEN}[✓] İndirme tamamlandı.{Style.RESET_ALL}")
+            return True
 
         except Exception as e:
-            logger.error(f"Model hatası: {e}")
-            sys.exit(1)
+            logger.error(f"Model kontrolü hatası: {e}", exc_info=True)
+            print(f"{Fore.RED}[!] Model kontrolünde hata oluştu.{Style.RESET_ALL}")
+            print(f"    Detay: {str(e)}")
+            
+            # Fallback: Manuel kontrol dene
+            print(f"{Fore.YELLOW}[*] Manuel kontrol deneniyor...{Style.RESET_ALL}")
+            return self._fallback_check()
+
+    def _fallback_check(self):
+        """CLI komutu ile model kontrolü (fallback)"""
+        try:
+            result = subprocess.run(
+                ["ollama", "list"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if self.model_name in result.stdout:
+                print(f"{Fore.GREEN}[✓] Model bulundu (CLI).{Style.RESET_ALL}")
+                return True
+            
+            # Model yoksa indir
+            print(f"{Fore.YELLOW}[*] Model indiriliyor (CLI)...{Style.RESET_ALL}")
+            subprocess.run(
+                ["ollama", "pull", self.model_name],
+                timeout=600  # 10 dakika timeout
+            )
+            print(f"{Fore.GREEN}[✓] İndirme tamamlandı.{Style.RESET_ALL}")
+            return True
+            
+        except subprocess.TimeoutExpired:
+            print(f"{Fore.RED}[!] İşlem zaman aşımına uğradı.{Style.RESET_ALL}")
+            return False
+        except Exception as e:
+            logger.error(f"Fallback hatası: {e}")
+            print(f"{Fore.RED}[!] Model kontrol edilemedi: {e}{Style.RESET_ALL}")
+            return False
 
     def stop_engine(self):
+        """Ollama servisini durdur (sadece biz başlattıysak)"""
         if self.server_process:
-            self.server_process.terminate()
+            try:
+                self.server_process.terminate()
+                self.server_process.wait(timeout=5)
+                logger.info("Ollama servisi durduruldu.")
+            except Exception as e:
+                logger.warning(f"Servis durdurma hatası: {e}")
+                # Force kill
+                try:
+                    self.server_process.kill()
+                except:
+                    pass

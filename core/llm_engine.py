@@ -55,6 +55,18 @@ class LLMEngine:
                     sys.stdout.flush()
             
             print(f"\n{Fore.GREEN}[✓] Analiz Tamamlandı.{Style.RESET_ALL}")
+            
+            # DEBUG: Ham yanıtı loglayalım
+            logger.debug(f"AI Ham Yanıt:\n{full_response}")
+            
+            # DEBUG: Yanıtı dosyaya kaydedelim (sorun giderme için)
+            try:
+                with open('logs/last_ai_response.txt', 'w', encoding='utf-8') as f:
+                    f.write(full_response)
+                print(f"{Fore.YELLOW}[i] AI yanıtı kaydedildi: logs/last_ai_response.txt{Style.RESET_ALL}")
+            except:
+                pass
+            
             return full_response
 
         except Exception as e:

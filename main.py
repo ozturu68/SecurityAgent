@@ -13,8 +13,6 @@ def check_system_deps():
     if not shutil.which("nmap"):
         missing.append("nmap")
     
-    # Not: Ollama kontrolünü AI Manager içinde yapıyoruz, burada zorunlu değil
-    # ama kullanıcıya baştan söylemek iyidir.
     if not shutil.which("ollama"):
         missing.append("ollama")
 
@@ -41,14 +39,30 @@ def ensure_environment():
 
         os.execv(python_executable, [python_executable] + sys.argv)
 
-    # 2. Root Yetkisi
-    if os.geteuid() != 0:
-        print(" [*] Tam otomasyon için Root şifresi gerekiyor...")
+    # 2. Root Yetkisi (SADECE STEALTH MOD İÇİN)
+    if "--mode" in sys.argv or "-m" in sys.argv:
         try:
-            subprocess.check_call(['sudo', sys.executable] + sys.argv)
+            mode_idx = sys.argv.index("-m") if "-m" in sys.argv else sys.argv.index("--mode")
+            mode = sys.argv[mode_idx + 1]
+        except (ValueError, IndexError):
+            mode = "quick"
+    else:
+        mode = "quick"
+    
+    if mode == "stealth" and os.geteuid() != 0:
+        print(f" [!] '{mode}' modu için Root yetkisi gerekiyor (SYN Scan).")
+        response = input(" [?] Sudo ile devam edilsin mi? (e/h): ").strip().lower()
+        
+        if response == 'e':
+            try:
+                subprocess.check_call(['sudo', sys.executable] + sys.argv)
+                sys.exit(0)
+            except Exception as e:
+                print(f" [!] Sudo başarısız: {e}")
+                sys.exit(1)
+        else:
+            print(" [i] Stealth modu iptal edildi. Lütfen 'quick' veya 'full' kullanın.")
             sys.exit(0)
-        except Exception as e:
-            sys.exit(1)
 
 ensure_environment()
 
@@ -63,7 +77,7 @@ try:
     from modules.analyzer import VulnerabilityAnalyzer
     from modules.reporter import ReportGenerator
     from utils.logger import setup_logger
-    from utils.ai_manager import AIManager # YENİ EKLENTİ
+    from utils.ai_manager import AIManager
 except ImportError as e:
     print(f"Kritik Hata: {e}")
     sys.exit(1)
@@ -79,23 +93,46 @@ BANNER = f"""
 """
 
 def parse_arguments():
-    parser = argparse.ArgumentParser(description="Otomatize Siber Güvenlik Analiz Ajanı")
+    parser = argparse.ArgumentParser(
+        description="Otomatize Siber Güvenlik Analiz Ajanı",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Örnekler:
+  %(prog)s -t scanme.nmap.org -m quick
+  %(prog)s -t 192.168.1.1 -m full --model 7b
+  %(prog)s -t example.com -m stealth --verbose
+        """
+    )
     parser.add_argument("-t", "--target", required=True, help="Hedef IP veya Domain")
-    parser.add_argument("-m", "--mode", choices=["quick", "full", "stealth"], default="quick", help="Tarama Modu")
-    parser.add_argument("-o", "--output", help="Rapor adı")
+    parser.add_argument("-m", "--mode", choices=["quick", "full", "stealth"], 
+                       default="quick", help="Tarama Modu (default: quick)")
+    parser.add_argument("-o", "--output", help="Rapor adı (uzantısız)")
+    parser.add_argument("--model", choices=["1.5b", "7b", "8b"], 
+                       default="7b", help="AI Model boyutu (default: 7b)")
     parser.add_argument("--verbose", action="store_true", help="Detaylı log")
     return parser.parse_args()
+
+def get_model_name(size):
+    """Model boyutuna göre tam model adını döndür"""
+    models = {
+        "1.5b": "deepseek-r1:1.5b",
+        "7b": "deepseek-r1:7b",
+        "8b": "deepseek-r1:8b"
+    }
+    return models.get(size, "deepseek-r1:7b")
 
 def main():
     print(BANNER)
     args = parse_arguments()
     logger = setup_logger(logging.DEBUG if args.verbose else logging.INFO)
     
+    # Model seçimi
+    selected_model = get_model_name(args.model)
+    print(f"{Fore.YELLOW}[i] Seçili Model: {selected_model}{Style.RESET_ALL}")
+    
     # --- AI HAZIRLIĞI ---
-    # Tarama sürerken arka planda AI hazır olsun diye en başta başlatıyoruz.
-    ai_manager = AIManager(MODEL_NAME)
+    ai_manager = AIManager(selected_model)
     ai_manager.start_engine()
-    # Model kontrolünü burada yapalım ki analiz sırasında beklemeyelim
     ai_manager.check_model()
 
     try:
@@ -122,10 +159,18 @@ def main():
 
         full_scan_data = {**recon_results, **scan_results}
 
-        # 3. ANALYZE
+        # 3. ANALYZE (Model değiştirme için özel config)
         print(f"\n{Fore.BLUE}[*] 3. Aşama: AI Analizi...{Style.RESET_ALL}")
+        
+        # Model'i geçici olarak değiştir
+        import config
+        original_model = config.MODEL_NAME
+        config.MODEL_NAME = selected_model
+        
         analyzer = VulnerabilityAnalyzer(scan_data=full_scan_data)
         vulnerabilities = analyzer.analyze()
+        
+        config.MODEL_NAME = original_model  # Geri al
         
         # 4. REPORT
         print(f"\n{Fore.BLUE}[*] 4. Aşama: Raporlama...{Style.RESET_ALL}")
@@ -133,8 +178,10 @@ def main():
         output_name = args.output if args.output else f"report_{int(time.time())}"
         out_path = reporter.export_json(filename=output_name)
         
-        print(f"\n{Fore.GREEN}[OK] İşlem Tamamlandı.{Style.RESET_ALL}")
+        elapsed = time.time() - start_time
+        print(f"\n{Fore.GREEN}[OK] İşlem Tamamlandı ({elapsed:.1f}s).{Style.RESET_ALL}")
         print(f"    Rapor: {out_path}")
+        print(f"    Bulgu Sayısı: {len(vulnerabilities)}")
 
     except KeyboardInterrupt:
         print(f"\n{Fore.RED}[!] Kullanıcı iptali.{Style.RESET_ALL}")
@@ -142,8 +189,6 @@ def main():
         logger.error(f"Beklenmeyen Hata: {e}", exc_info=True)
         print(f"\n{Fore.RED}[!] Bir hata oluştu. Log dosyasına bakınız.{Style.RESET_ALL}")
     finally:
-        # Program bittiğinde, eğer biz başlattıysak AI motorunu temizleyelim
-        # Not: Sürekli açık kalmasını istiyorsanız bu satırı yorum satırı yapın.
         ai_manager.stop_engine()
 
 if __name__ == "__main__":
