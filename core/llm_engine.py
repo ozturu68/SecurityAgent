@@ -13,8 +13,13 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 class LLMEngine:
-    def __init__(self):
-        self.model = MODEL_NAME
+    def __init__(self, model_name=None):
+        """
+        Args:
+            model_name: Özel model adı (None ise config'den alır)
+        """
+        self.model = model_name if model_name else MODEL_NAME
+        logger.info(f"LLMEngine başlatıldı: {self.model}")
 
     def analyze_scan_data(self, scan_data):
         logger.info(f"LLM Analizi Başlıyor... Model: {self.model}")
@@ -57,9 +62,9 @@ class LLMEngine:
             print(f"\n{Fore.GREEN}[✓] Analiz Tamamlandı.{Style.RESET_ALL}")
             
             # DEBUG: Ham yanıtı loglayalım
-            logger.debug(f"AI Ham Yanıt:\n{full_response}")
+            logger.debug(f"AI Ham Yanıt (ilk 500 karakter):\n{full_response[:500]}")
             
-            # DEBUG: Yanıtı dosyaya kaydedelim (sorun giderme için)
+            # DEBUG: Yanıtı dosyaya kaydedelim
             try:
                 with open('logs/last_ai_response.txt', 'w', encoding='utf-8') as f:
                     f.write(full_response)

@@ -71,7 +71,6 @@ try:
     from colorama import Fore, Style, init
     init(autoreset=True)
     
-    from config import MODEL_NAME
     from modules.scanner import NetworkScanner
     from modules.recon import ReconScanner
     from modules.analyzer import VulnerabilityAnalyzer
@@ -92,34 +91,39 @@ BANNER = f"""
 {Fore.YELLOW}  >> CyberSec-Agent Auto-Pilot << {Style.RESET_ALL}
 """
 
+# Model haritası
+MODEL_MAP = {
+    "deepseek-1.5b": "deepseek-r1:1.5b",
+    "deepseek-7b": "deepseek-r1:7b",
+    "deepseek-8b": "deepseek-r1:8b",
+    "mistral": "mistral:latest",
+    "nemotron": "nemotron-mini:latest",
+    "llama3": "llama3.2:latest",
+    "qwen": "qwen2.5-coder:3b"
+}
+
 def parse_arguments():
     parser = argparse.ArgumentParser(
         description="Otomatize Siber Güvenlik Analiz Ajanı",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+        epilog=f"""
 Örnekler:
   %(prog)s -t scanme.nmap.org -m quick
-  %(prog)s -t 192.168.1.1 -m full --model 7b
-  %(prog)s -t example.com -m stealth --verbose
+  %(prog)s -t 192.168.1.1 -m full --model mistral
+  %(prog)s -t example.com --model nemotron --verbose
+
+Mevcut modeller: {', '.join(MODEL_MAP.keys())}
         """
     )
     parser.add_argument("-t", "--target", required=True, help="Hedef IP veya Domain")
     parser.add_argument("-m", "--mode", choices=["quick", "full", "stealth"], 
                        default="quick", help="Tarama Modu (default: quick)")
     parser.add_argument("-o", "--output", help="Rapor adı (uzantısız)")
-    parser.add_argument("--model", choices=["1.5b", "7b", "8b"], 
-                       default="7b", help="AI Model boyutu (default: 7b)")
+    parser.add_argument("--model", choices=list(MODEL_MAP.keys()), 
+                       default="mistral", 
+                       help="AI Model (default: mistral - JSON üretiminde en iyi)")
     parser.add_argument("--verbose", action="store_true", help="Detaylı log")
     return parser.parse_args()
-
-def get_model_name(size):
-    """Model boyutuna göre tam model adını döndür"""
-    models = {
-        "1.5b": "deepseek-r1:1.5b",
-        "7b": "deepseek-r1:7b",
-        "8b": "deepseek-r1:8b"
-    }
-    return models.get(size, "deepseek-r1:7b")
 
 def main():
     print(BANNER)
@@ -127,13 +131,19 @@ def main():
     logger = setup_logger(logging.DEBUG if args.verbose else logging.INFO)
     
     # Model seçimi
-    selected_model = get_model_name(args.model)
+    selected_model = MODEL_MAP[args.model]
     print(f"{Fore.YELLOW}[i] Seçili Model: {selected_model}{Style.RESET_ALL}")
+    
+    if args.model == "mistral":
+        print(f"{Fore.GREEN}[✓] Mistral seçildi - JSON üretiminde en stabil{Style.RESET_ALL}")
     
     # --- AI HAZIRLIĞI ---
     ai_manager = AIManager(selected_model)
     ai_manager.start_engine()
-    ai_manager.check_model()
+    
+    if not ai_manager.check_model():
+        print(f"{Fore.RED}[!] Model yüklenemedi. İşlem iptal ediliyor.{Style.RESET_ALL}")
+        return
 
     try:
         start_time = time.time()
@@ -159,18 +169,10 @@ def main():
 
         full_scan_data = {**recon_results, **scan_results}
 
-        # 3. ANALYZE (Model değiştirme için özel config)
+        # 3. ANALYZE - Model'i parametre olarak geç
         print(f"\n{Fore.BLUE}[*] 3. Aşama: AI Analizi...{Style.RESET_ALL}")
-        
-        # Model'i geçici olarak değiştir
-        import config
-        original_model = config.MODEL_NAME
-        config.MODEL_NAME = selected_model
-        
-        analyzer = VulnerabilityAnalyzer(scan_data=full_scan_data)
+        analyzer = VulnerabilityAnalyzer(scan_data=full_scan_data, model_name=selected_model)
         vulnerabilities = analyzer.analyze()
-        
-        config.MODEL_NAME = original_model  # Geri al
         
         # 4. REPORT
         print(f"\n{Fore.BLUE}[*] 4. Aşama: Raporlama...{Style.RESET_ALL}")
@@ -179,9 +181,19 @@ def main():
         out_path = reporter.export_json(filename=output_name)
         
         elapsed = time.time() - start_time
-        print(f"\n{Fore.GREEN}[OK] İşlem Tamamlandı ({elapsed:.1f}s).{Style.RESET_ALL}")
-        print(f"    Rapor: {out_path}")
-        print(f"    Bulgu Sayısı: {len(vulnerabilities)}")
+        
+        # Özet tablo
+        print(f"\n{Fore.CYAN}{'='*60}{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}📊 ÖZET{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}{'='*60}{Style.RESET_ALL}")
+        print(f"  🎯 Hedef         : {args.target}")
+        print(f"  🌐 IP            : {target_ip}")
+        print(f"  🤖 Model         : {selected_model}")
+        print(f"  🔓 Açık Portlar  : {len(scan_results.get('open_ports', []))}")
+        print(f"  🚨 Bulgular      : {len(vulnerabilities)}")
+        print(f"  ⏱️  Süre          : {elapsed:.1f}s")
+        print(f"  📄 Rapor         : {out_path}")
+        print(f"{Fore.CYAN}{'='*60}{Style.RESET_ALL}\n")
 
     except KeyboardInterrupt:
         print(f"\n{Fore.RED}[!] Kullanıcı iptali.{Style.RESET_ALL}")

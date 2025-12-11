@@ -8,28 +8,27 @@ logger = logging.getLogger(__name__)
 class DualStreamParser:
     @staticmethod
     def extract_json(text: str) -> Optional[str]:
-        """JSON bloğunu çoklu yöntemle bul"""
-        
-        # Yöntem 1: Markdown kod bloğu
+        """Extract JSON from text using multiple methods"""
+        # Method 1: Markdown code block
         markdown_match = re.search(r'```json\s*(.*?)\s*```', text, re.DOTALL)
         if markdown_match:
             candidate = markdown_match.group(1).strip()
             if candidate.startswith('{') and candidate.endswith('}'):
                 return candidate
         
-        # Yöntem 2: Markdown olmadan kod bloğu
+        # Method 2: Generic code block
         code_match = re.search(r'```\s*(.*?)\s*```', text, re.DOTALL)
         if code_match:
             candidate = code_match.group(1).strip()
             if candidate.startswith('{') and candidate.endswith('}'):
                 return candidate
         
-        # Yöntem 3: Balanced brace extraction (en güçlü yöntem)
+        # Method 3: Balanced brace extraction
         return DualStreamParser._extract_balanced_json(text)
     
     @staticmethod
     def _extract_balanced_json(text: str) -> Optional[str]:
-        """Dengeli parantez bulma (nested JSON için)"""
+        """Find balanced JSON with proper brace counting"""
         first_brace = text.find('{')
         if first_brace == -1:
             return None
@@ -41,18 +40,15 @@ class DualStreamParser:
         for i in range(first_brace, len(text)):
             char = text[i]
             
-            # String içinde miyiz kontrolü
             if char == '"' and not escape_next:
                 in_string = not in_string
             
-            # Escape karakteri
             if char == '\\' and not escape_next:
                 escape_next = True
                 continue
             else:
                 escape_next = False
             
-            # String dışında parantez sayma
             if not in_string:
                 if char == '{':
                     brace_count += 1
@@ -65,135 +61,116 @@ class DualStreamParser:
 
     @staticmethod
     def parse_response(raw_response: str) -> Dict:
-        """Süper güçlendirilmiş ayrıştırma"""
+        """Parse and validate AI response"""
         if not raw_response:
-            logger.warning("Boş AI yanıtı")
-            return DualStreamParser._empty_result("Yanıt alınamadı")
+            logger.warning("Empty AI response")
+            return DualStreamParser._empty_result("No response received")
 
-        # 1. Düşünce bloklarını temizle
+        # Remove <think> blocks
         clean = re.sub(r'<think>.*?</think>', '', raw_response, flags=re.DOTALL | re.IGNORECASE)
         clean = clean.strip()
         
-        # 2. JSON'u bul
+        # Extract JSON
         json_str = DualStreamParser.extract_json(clean)
         if not json_str:
-            logger.warning("JSON bulunamadı, ham yanıt loglandı")
-            logger.debug(f"Temizlenmiş metin: {clean[:500]}")
-            return DualStreamParser._empty_result("Format hatası - JSON bulunamadı")
+            logger.warning("No JSON found in response")
+            return DualStreamParser._empty_result("JSON not found")
 
-        # 3. Önce düzeltmeden parse dene
+        # Parse
         try:
             data = json.loads(json_str)
             return DualStreamParser._validate_schema(data)
         except json.JSONDecodeError as e:
-            logger.warning(f"İlk parse başarısız: {e}")
-            # 4. Onarma dene
+            logger.warning(f"JSON parse failed: {e}")
             repaired = DualStreamParser._aggressive_repair(json_str)
             if repaired:
                 try:
                     data = json.loads(repaired)
-                    logger.info("JSON onarma başarılı!")
+                    logger.info("JSON repair successful")
                     return DualStreamParser._validate_schema(data)
                 except:
                     pass
         
-        # 5. Son çare: Manuel extraction
-        logger.error("Tüm parse yöntemleri başarısız")
+        logger.error("All parse methods failed")
         return DualStreamParser._manual_extraction(clean)
 
     @staticmethod
     def _aggressive_repair(broken_json: str) -> Optional[str]:
-        """Agresif JSON onarma"""
+        """Aggressively repair broken JSON"""
         try:
-            # Temel düzeltmeler
             repaired = broken_json
-            
-            # 1. Tek tırnak -> Çift tırnak
             repaired = repaired.replace("'", '"')
-            
-            # 2. Trailing comma temizleme
             repaired = re.sub(r',(\s*[}\]])', r'\1', repaired)
-            
-            # 3. Çift tırnak düzeltmeleri
-            repaired = re.sub(r'(\w+):', r'"\1":', repaired)  # Key'leri tırnak içine al
-            
-            # 4. Eksik virgüller
-            repaired = re.sub(r'"\s*\n\s*"', '",\n"', repaired)  # String'ler arası
-            repaired = re.sub(r'}\s*{', '},{', repaired)  # Objeler arası
-            repaired = re.sub(r']\s*\[', '],[', repaired)  # Array'ler arası
-            
-            # 5. Newline'ları string içinde temizle
-            # (JSON string'lerde \n olmalı, gerçek newline değil)
-            repaired = re.sub(r':\s*"([^"]*)\n([^"]*)"', r': "\1\\n\2"', repaired)
-            
+            repaired = re.sub(r'(\w+):', r'"\1":', repaired)
+            repaired = re.sub(r'"\s*\n\s*"', '",\n"', repaired)
+            repaired = re.sub(r'}\s*{', '},{', repaired)
+            repaired = re.sub(r']\s*\[', '],[', repaired)
             return repaired
-            
         except Exception as e:
-            logger.error(f"Onarma hatası: {e}")
+            logger.error(f"Repair failed: {e}")
             return None
     
     @staticmethod
     def _manual_extraction(text: str) -> Dict:
-        """Son çare: Regex ile değerleri çıkar"""
+        """Last resort: extract values manually"""
         result = {
-            "summary": "Manuel çıkarım yapıldı",
+            "summary": "Manual extraction performed",
             "vulnerabilities": [],
             "recommended_actions": []
         }
         
         try:
-            # Summary bul
             summary_match = re.search(r'"summary"\s*:\s*"([^"]*)"', text, re.IGNORECASE)
             if summary_match:
                 result["summary"] = summary_match.group(1)
             
-            # Port numaralarını bul
             port_matches = re.findall(r'"port"\s*:\s*(\d+)', text)
-            
-            # Her port için basit bir vulnerability oluştur
             for port in set(port_matches):
                 result["vulnerabilities"].append({
                     "port": int(port),
-                    "service": "Bilinmiyor",
+                    "service": "Unknown",
                     "severity": "Medium",
-                    "description": f"Port {port} açık (Manuel tespit)"
+                    "description": f"Port {port} open (manual detection)"
                 })
             
-            logger.info(f"Manuel extraction: {len(result['vulnerabilities'])} bulgu")
-            
+            logger.info(f"Manual extraction: {len(result['vulnerabilities'])} findings")
         except Exception as e:
-            logger.error(f"Manuel extraction hatası: {e}")
+            logger.error(f"Manual extraction failed: {e}")
         
         return result
 
     @staticmethod
     def _validate_schema(data: Dict) -> Dict:
-        """Şema doğrulama ve eksikleri doldurma"""
+        """Validate and clean up data structure"""
         if not isinstance(data, dict):
-            return DualStreamParser._empty_result("Geçersiz veri tipi")
+            return DualStreamParser._empty_result("Invalid data type")
         
-        # Zorunlu alanları doldur
+        # Remove unwanted fields
+        data.pop('think', None)
+        data.pop('reasoning', None)
+        data.pop('analysis', None)
+        
+        # Ensure required fields
         if "vulnerabilities" not in data:
             data["vulnerabilities"] = []
         
         if "summary" not in data:
-            data["summary"] = f"{len(data.get('vulnerabilities', []))} bulgu tespit edildi"
+            vuln_count = len(data.get("vulnerabilities", []))
+            data["summary"] = f"{vuln_count} security findings detected" if vuln_count > 0 else "No vulnerabilities found"
         
         if "recommended_actions" not in data:
             data["recommended_actions"] = []
         
-        # Vulnerability'leri validate et
+        # Validate vulnerabilities
         valid_vulns = []
         for vuln in data.get("vulnerabilities", []):
             if isinstance(vuln, dict) and "port" in vuln:
-                # Eksik alanları doldur
                 if "severity" not in vuln:
                     vuln["severity"] = "Medium"
                 if "service" not in vuln:
                     vuln["service"] = "Unknown"
                 if "description" not in vuln:
-                    vuln["description"] = "Güvenlik riski tespit edildi"
-                
+                    vuln["description"] = "Security risk detected"
                 valid_vulns.append(vuln)
         
         data["vulnerabilities"] = valid_vulns
@@ -201,7 +178,7 @@ class DualStreamParser:
     
     @staticmethod
     def _empty_result(message: str) -> Dict:
-        """Boş ama geçerli sonuç döndür"""
+        """Return empty but valid result"""
         return {
             "summary": message,
             "vulnerabilities": [],
