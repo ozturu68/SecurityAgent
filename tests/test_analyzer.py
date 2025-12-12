@@ -94,7 +94,7 @@ class TestVulnerabilityAnalyzer:
         assert result == []
     
     @patch('core.parser.DualStreamParser.parse_response')
-    @patch('core.llm_engine. LLMAgent.query')
+    @patch('core.llm_engine.LLMAgent.query')
     def test_analyze_with_summary(self, mock_query, mock_parser, sample_scan_data):
         """Test that summary is logged when present"""
         mock_query.return_value = 'response'
